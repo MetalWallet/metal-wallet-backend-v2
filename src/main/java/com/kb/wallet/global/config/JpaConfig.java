@@ -82,7 +82,7 @@ public class JpaConfig {
     @Bean
     public Properties jpaProperties() {
       Properties properties = new Properties();
-      properties.put("hibernate.hbm2ddl.auto", "update");
+      properties.put("hibernate.hbm2ddl.auto", "create");
       properties.put("hibernate.dialect", "org.hibernate.dialect.MySQL5InnoDBDialect");
       properties.put("hibernate.show_sql", "true");
       properties.put("hibernate.physical_naming_strategy",
