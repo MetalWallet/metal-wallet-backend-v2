@@ -60,11 +60,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+
 @ExtendWith(SpringExtension.class)
 @ContextConfiguration(classes = {AppConfig.class})
 @Transactional
 @ActiveProfiles("test")
 class TicketServiceTest {
+
   private static final Logger log = LoggerFactory.getLogger(TicketServiceTest.class);
   @InjectMocks
   private TicketServiceImpl ticketService;
@@ -195,7 +197,8 @@ class TicketServiceTest {
     when(ticketRepository.findById(1L)).thenReturn(Optional.empty());
 
     // when, then
-    CustomException exception = assertThrows(CustomException.class, () -> ticketService.getTicket(1L));
+    CustomException exception = assertThrows(CustomException.class,
+        () -> ticketService.getTicket(1L));
     assertThat(exception.getMessage()).isEqualTo("티켓을 찾을 수 없습니다.");
   }
 
@@ -209,10 +212,12 @@ class TicketServiceTest {
     // given
     when(memberService.getMemberByEmail("test@example.com")).thenReturn(member);
     when(seatService.getSeatById(1L)).thenReturn(seat1);
-    doThrow(new CustomException(ErrorCode.TICKET_NOT_FOUND_ERROR)).when(seat1).checkSeatAvailability();
+    doThrow(new CustomException(ErrorCode.TICKET_NOT_FOUND_ERROR)).when(seat1)
+        .checkSeatAvailability();
 
     // when, then
-    CustomException exception = assertThrows(CustomException.class, () -> ticketService.bookTicket("test@example.com", request));
+    CustomException exception = assertThrows(CustomException.class,
+        () -> ticketService.bookTicket("test@example.com", request));
     assertThat(exception.getMessage()).isEqualTo("티켓을 찾을 수 없습니다.");
   }
 
@@ -228,7 +233,8 @@ class TicketServiceTest {
         .build();
 
     // given
-    when(ticketRepository.findByTicketIdAndEmail(ticketId, member.getEmail())).thenReturn(Optional.of(ticket));
+    when(ticketRepository.findByTicketIdAndEmail(ticketId, member.getEmail())).thenReturn(
+        Optional.of(ticket));
 
     // when
     ticketService.cancelTicket("test@example.com", ticketId);
@@ -244,10 +250,12 @@ class TicketServiceTest {
     Long ticketId = 1L;
 
     // given
-    when(ticketRepository.findByTicketIdAndEmail(ticketId, "test@example.com")).thenReturn(Optional.empty());
+    when(ticketRepository.findByTicketIdAndEmail(ticketId, "test@example.com")).thenReturn(
+        Optional.empty());
 
     // when, then
-    CustomException exception = assertThrows(CustomException.class, () -> ticketService.cancelTicket("test@example.com", ticketId));
+    CustomException exception = assertThrows(CustomException.class,
+        () -> ticketService.cancelTicket("test@example.com", ticketId));
     assertThat(exception.getMessage()).isEqualTo("티켓을 찾을 수 없습니다.");
   }
 
@@ -262,11 +270,13 @@ class TicketServiceTest {
     List<TicketListResponse> responses = Collections.singletonList(response);
 
     Pageable pageable = PageRequest.of(0, 10, Sort.by("createdAt").descending());
-    when(ticketRepository.findAllByMemberAndTicketStatus("test@example.com", TicketStatus.BOOKED, null, pageable))
+    when(ticketRepository.findAllByMemberAndTicketStatus("test@example.com", TicketStatus.BOOKED,
+        null, pageable))
         .thenReturn(responses);
 
     // when
-    List<TicketListResponse> result = ticketService.getTickets("test@example.com", TicketStatus.BOOKED, 0, 10, null);
+    List<TicketListResponse> result = ticketService.getTickets("test@example.com",
+        TicketStatus.BOOKED, 0, 10, null);
 
     // then
     assertThat(result).isNotNull();
@@ -325,7 +335,7 @@ class TicketServiceTest {
 
   @Test
   @DisplayName("50명이 동시에 같은 좌석을 예매할 경우, 단 1건만 성공해야 한다")
-    void testConcurrentSameSeatBooking() throws InterruptedException {
+  void testConcurrentSameSeatBooking() throws InterruptedException {
     // Given
     int numberOfThreads = 50;
     Long targetSeatId = 1L;
@@ -481,6 +491,29 @@ class TicketServiceTest {
       verifyDatabaseState(seatId);
     }
     log.info("===== 테스트 종료 =====");
+  }
+
+  @Test
+  @DisplayName("좌석 상태와 예매 정보 불일치 검증")
+  void testSeatStatusAndTicketMismatch() {
+    // Given: 좌석만 예약된 비정상 상태 생성
+    Long targetSeatId = 1L;
+    log.info("좌석 ID {} 예약 불가능 상태로 설정", targetSeatId);
+    jdbcTemplate.update("UPDATE seat SET is_available = false WHERE id = ?", targetSeatId);
+
+    // When: 검증 및 복구 프로세스 실행
+    TicketRequest request = new TicketRequest();
+    request.setSeatId(Collections.singletonList(targetSeatId));
+    request.setDeviceId("device1");
+
+    log.info("사용자 test1@test.com이 좌석 ID {}의 예매 시도", targetSeatId);
+
+    // Then: 예매 시도시 예외 발생 확인
+    CustomException exception = assertThrows(CustomException.class, () -> {
+      ticketService.bookTicket("test1@test.com", request);
+    });
+
+    log.error("예매 실패 - 좌석 ID {}: {}", targetSeatId, exception.getMessage());
   }
 
   private void analyzeResults(ConcurrentHashMap<String, BookingResult> results,
