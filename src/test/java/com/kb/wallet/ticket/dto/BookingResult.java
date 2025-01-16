@@ -1,8 +1,7 @@
 package com.kb.wallet.ticket.dto;
 
 public class BookingResult {
-
-  private final int userId;
+  private final Long userId;
   private final boolean success;
   private final String errorMessage;
   private final long processingTimeNanos;
@@ -10,14 +9,14 @@ public class BookingResult {
 
   public BookingResult(int userId, boolean success, String errorMessage,
       long processingTimeNanos, Long seatId) {
-    this.userId = userId;
+    this.userId = (long) userId;
     this.success = success;
     this.errorMessage = errorMessage;
     this.processingTimeNanos = processingTimeNanos;
     this.seatId = seatId;
   }
 
-  public int getUserId() {
+  public Long getUserId() {
     return userId;
   }
 
