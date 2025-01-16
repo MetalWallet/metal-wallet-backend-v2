@@ -93,7 +93,6 @@ class TicketServiceTest {
   void setUp() {
     MockitoAnnotations.openMocks(this);
 
-    // 목 객체 설정
     member = new Member();
     member.setEmail("test@example.com");
     musical = mock(Musical.class);
@@ -107,7 +106,6 @@ class TicketServiceTest {
     when(seat2.getSchedule()).thenReturn(schedule);
     when(schedule.getMusical()).thenReturn(musical);
 
-    // 데이터베이스 초기화
     cleanUpAll();
     initializeTestData();
   }
@@ -118,7 +116,6 @@ class TicketServiceTest {
   }
 
   private void initializeTestData() {
-    // 기존의 데이터베이스 초기화 로직 그대로 유지
     for (int i = 1; i <= 50; i++) {
       jdbcTemplate.execute(
           String.format(
