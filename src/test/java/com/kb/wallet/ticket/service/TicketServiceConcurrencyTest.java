@@ -48,8 +48,8 @@ class TicketServiceConcurrencyTest {
   @BeforeEach
   public void setUp() {
     cleanUpAll();
-    // member 데이터 삽입 (50명)
-    for (int i = 1; i <= 50; i++) {
+    // member 데이터 삽입
+    for (int i = 1; i <= 10; i++) {
       jdbcTemplate.execute(
           String.format(
               "insert into member (id, email, is_activated, name, password, phone, pin_number, role) values "
@@ -58,30 +58,21 @@ class TicketServiceConcurrencyTest {
       );
     }
 
-    // musical 데이터 삽입
     jdbcTemplate.execute(
         "insert into musical (id, place, place_detail, ranking, running_time, ticketing_end_date, ticketing_start_date, title, detail_image_url, notice_image_url, place_image_url, poster_image_url) values "
             + "(1, '서울', '서울 아트센터', 1, 150, '2024-10-16', '2024-10-01', '킹키부츠', null, null, null, null)");
 
-    // schedule 데이터 삽입
     jdbcTemplate.execute(
         "insert into schedule (id, date, start_time, end_time, musical_id) values "
             + "(1, '2024-10-17', '10:00:00', '12:30:00', 1)");
 
-    // section 데이터 삽입
     jdbcTemplate.execute(
         "insert into section (id, available_seats, grade, price, musical_id, schedule_id) values "
             + "(1, 50, 'R', 190000, 1, 1)");
 
-    // seat 데이터 삽입 (50개)
-    for (int i = 1; i <= 50; i++) {
-      jdbcTemplate.execute(
-          String.format(
-              "insert into seat (id, is_available, seat_no, schedule_id, section_id) values "
-                  + "(%d, true, %d, 1, 1)",
-              i, i)
-      );
-    }
+    jdbcTemplate.execute(
+        "insert into seat (id, is_available, seat_no, schedule_id, section_id) values " +
+            "(1, true, 1, 1, 1)");
   }
 
   @AfterEach
@@ -98,153 +89,109 @@ class TicketServiceConcurrencyTest {
     jdbcTemplate.execute("DELETE FROM musical");
     jdbcTemplate.execute("DELETE FROM member");
   }
-
   @Test
-  @DisplayName("결제 완료 후 동시 티켓 할당으로 인한 중복 예매 발생 시나리오")
-  void testDoubleBookingAfterPayment() throws InterruptedException {
+  @DisplayName("10명이 동시에 같은 좌석을 예매할 경우, 단 1건만 성공해야 한다")
+  void testConcurrentSameSeatBooking() throws InterruptedException {
     // Given
+    int numberOfThreads = 10;
     Long targetSeatId = 1L;
-    String firstUser = "test1@test.com";
-    String secondUser = "test2@test.com";
 
-    log.info("===== 결제 순서와 티켓 할당 순서 불일치 시나리오 테스트 시작 =====");
-    log.info("테스트 설정 정보:");
-    log.info("- 대상 좌석 ID: {}", targetSeatId);
-    log.info("- 첫 번째 결제 사용자: {}", firstUser);
-    log.info("- 두 번째 결제 사용자: {}", secondUser);
-
-    // 1. 첫 번째 사용자 결제 시뮬레이션
-    Long firstUserId = jdbcTemplate.queryForObject(
-        "SELECT id FROM member WHERE email = ?",
-        Long.class,
-        firstUser
-    );
-
-    // 2. 두 번째 사용자 결제 시뮬레이션
-    Long secondUserId = jdbcTemplate.queryForObject(
-        "SELECT id FROM member WHERE email = ?",
-        Long.class,
-        secondUser
-    );
-
-    log.info("사전 결제 처리 상태:");
-    log.info("- 첫 번째 사용자: {} (ID: {})", firstUser, firstUserId);
-    log.info("  * 결제 상태: 완료");
-    log.info("  * 티켓 할당 상태: 대기중");
-    log.info("- 두 번째 사용자: {} (ID: {})", secondUser, secondUserId);
-    log.info("  * 결제 상태: 완료");
-    log.info("  * 티켓 할당 상태: 대기중");
-
-    // 동시성 제어를 위한 래치 추가
+    ExecutorService executor = Executors.newFixedThreadPool(numberOfThreads);
+    CountDownLatch readyLatch = new CountDownLatch(numberOfThreads);
     CountDownLatch startLatch = new CountDownLatch(1);
-    CountDownLatch doneLatch = new CountDownLatch(2);
+    CountDownLatch doneLatch = new CountDownLatch(numberOfThreads);
 
-    // 결과 기록을 위한 원자적 참조
-    AtomicReference<String> firstUserResult = new AtomicReference<>("결제 완료, 티켓 할당 대기중");
-    AtomicReference<String> secondUserResult = new AtomicReference<>("결제 완료, 티켓 할당 대기중");
+    ConcurrentHashMap<String, BookingResult> results = new ConcurrentHashMap<>();
+    CopyOnWriteArrayList<Long> bookingOrder = new CopyOnWriteArrayList<>();
 
-    // 두 스레드에서 동시에 티켓 할당 시도
-    ExecutorService executorService = Executors.newFixedThreadPool(2);
+    log.info("===== 동시 예매 테스트 시작 (동일 좌석) =====");
+    log.info("테스트 설정:");
+    log.info("- 총 시도 사용자 수: {} 명", numberOfThreads);
+    log.info("- 대상 좌석 번호: {}", targetSeatId);
+    log.info("- 예상 성공 건수: 1건");
 
-    // 첫 번째 사용자 티켓 할당 태스크
-    Runnable firstUserBookingTask = () -> {
-      try {
-        log.info("첫 번째 사용자 스레드 시작: 동시 할당 시도 대기 중");
-        startLatch.await(); // 동시 시작 대기
+    ConcurrentHashMap<String, AtomicReference<String>> userResults = new ConcurrentHashMap<>();
 
-        TicketRequest firstRequest = new TicketRequest();
-        firstRequest.setSeatId(Collections.singletonList(targetSeatId));
-        firstRequest.setDeviceId("device1");
+    for (int i = 1; i <= numberOfThreads; i++) {
+      final int userId = i;
+      final String userEmail = String.format("test%d@test.com", userId);
+      userResults.put(userEmail, new AtomicReference<>("예매 시도 전"));
 
-        log.info("첫 번째 사용자 티켓 할당 시도:");
-        log.info("- 사용자: {}", firstUser);
-        log.info("- 대상 좌석: {}", targetSeatId);
-        log.info("- 결제 시간: 두 번째 사용자보다 먼저 완료");
+      Long currentUserId = jdbcTemplate.queryForObject(
+          "SELECT id FROM member WHERE email = ?",
+          Long.class,
+          userEmail
+      );
 
+      log.info("사용자 정보 초기화:");
+      log.info("- 사용자 {}: {} (ID: {})", userId, userEmail, currentUserId);
+      log.info("  * 상태: 예매 시도 전");
+
+      executor.submit(() -> {
         try {
-          // 의도적인 지연 추가
-          Thread.sleep(100);
+          log.info("사용자 {} 스레드 시작: 동시 예매 시도 대기 중", userEmail);
 
-          List<TicketResponse> tickets = ticketService.bookTicket(firstUser, firstRequest);
+          TicketRequest request = new TicketRequest();
+          request.setSeatId(Collections.singletonList(targetSeatId));
+          request.setDeviceId("device" + userId);
 
-          log.info("첫 번째 사용자 티켓 할당 성공:");
-          log.info("- 발급된 티켓 ID: {}", tickets.get(0).getId());
-          log.info("- 할당된 좌석: {}", targetSeatId);
+          readyLatch.countDown();
+          startLatch.await();
 
-          firstUserResult.set("결제 완료, 티켓 할당 성공");
-        } catch (CustomException e) {
-          log.error("첫 번째 사용자 티켓 할당 실패:");
-          log.error("- 에러 메시지: {}", e.getMessage());
-          log.error("- 시도한 사용자: {}", firstUser);
-          log.error("- 티켓 할당 시도 좌석: {}", targetSeatId);
+          log.info("사용자 {} 티켓 예매 시도:", userEmail);
+          log.info("- 대상 좌석: {}", targetSeatId);
+          log.info("- 디바이스: device{}", userId);
 
-          firstUserResult.set("결제 완료, 티켓 할당 실패: " + e.getMessage());
+          long startTime = System.nanoTime();
+          try {
+            List<TicketResponse> response = ticketService.bookTicket(userEmail, request);
+            long endTime = System.nanoTime();
+
+            log.info("사용자 {} 티켓 예매 성공:", userEmail);
+            log.info("- 발급된 티켓 ID: {}", response.get(0).getId());
+            log.info("- 소요 시간: {}ms", (endTime - startTime) / 1_000_000.0);
+
+            bookingOrder.add((long) userId);
+            results.put(userEmail,
+                new BookingResult(userId, true, null, endTime - startTime, targetSeatId));
+            userResults.get(userEmail).set("예매 성공");
+
+          } catch (Exception e) {
+            long endTime = System.nanoTime();
+
+            log.error("사용자 {} 티켓 예매 실패:", userEmail);
+            log.error("- 에러 메시지: {}", e.getMessage());
+            log.error("- 시도 좌석: {}", targetSeatId);
+            log.error("- 소요 시간: {}ms", (endTime - startTime) / 1_000_000.0);
+
+            results.put(userEmail,
+                new BookingResult(userId, false, e.getMessage(), endTime - startTime, targetSeatId));
+            userResults.get(userEmail).set("예매 실패: " + e.getMessage());
+          }
+        } catch (Exception e) {
+          log.error("예상치 못한 오류 발생 - 사용자: {}, 오류: {}", userEmail, e.getMessage());
+          userResults.get(userEmail).set("예상치 못한 오류 발생: " + e.getMessage());
         } finally {
-          log.info("첫 번째 사용자 스레드 종료");
           doneLatch.countDown();
         }
-      } catch (InterruptedException e) {
-        log.error("첫 번째 사용자 스레드 인터럽트 발생");
-        Thread.currentThread().interrupt();
-        doneLatch.countDown();
-      }
-    };
+      });
+    }
 
-    // 두 번째 사용자 티켓 할당 태스크
-    Runnable secondUserBookingTask = () -> {
-      try {
-        log.info("두 번째 사용자 스레드 시작: 동시 할당 시도 대기 중");
-        startLatch.await(); // 동시 시작 대기
+    readyLatch.await();
+    log.info("\n모든 사용자 준비 완료. 동시 예매 시작...");
 
-        TicketRequest secondRequest = new TicketRequest();
-        secondRequest.setSeatId(Collections.singletonList(targetSeatId));
-        secondRequest.setDeviceId("device2");
-
-        log.info("두 번째 사용자 티켓 할당 시도:");
-        log.info("- 사용자: {}", secondUser);
-        log.info("- 대상 좌석: {}", targetSeatId);
-
-        try {
-          List<TicketResponse> tickets = ticketService.bookTicket(secondUser, secondRequest);
-
-          log.info("두 번째 사용자 티켓 할당 성공:");
-          log.info("- 발급된 티켓 ID: {}", tickets.get(0).getId());
-          log.info("- 할당된 좌석: {}", targetSeatId);
-
-          secondUserResult.set("결제 완료, 티켓 할당 성공");
-        } catch (CustomException e) {
-          log.error("두 번째 사용자 티켓 할당 실패:");
-          log.error("- 에러 메시지: {}", e.getMessage());
-          log.error("- 시도한 사용자: {}", secondUser);
-          log.error("- 티켓 할당 시도 좌석: {}", targetSeatId);
-
-          secondUserResult.set("결제 완료, 티켓 할당 실패: " + e.getMessage());
-        } finally {
-          log.info("두 번째 사용자 스레드 종료");
-          doneLatch.countDown();
-        }
-      } catch (InterruptedException e) {
-        log.error("두 번째 사용자 스레드 인터럽트 발생");
-        Thread.currentThread().interrupt();
-        doneLatch.countDown();
-      }
-    };
-
-    // 태스크 제출
-    log.info("스레드 풀에 태스크 제출");
-    executorService.submit(firstUserBookingTask);
-    executorService.submit(secondUserBookingTask);
-
-    // 동시 시작
-    log.info("동시 티켓 할당 시도 시작 신호 발생");
+    long testStartTime = System.nanoTime();
     startLatch.countDown();
 
-    // 모든 작업 완료 대기
-    log.info("모든 작업 완료 대기 시작");
-    doneLatch.await(10, TimeUnit.SECONDS);
-    executorService.shutdown();
+    boolean completed = doneLatch.await(10, TimeUnit.SECONDS);
+    long testEndTime = System.nanoTime();
 
-    // 최종 상태 검증
+    if (!completed) {
+      log.error("테스트 타임아웃 발생 (10초 초과)");
+    }
+
+    executor.shutdown();
+
     Map<String, Object> finalTicketInfo = jdbcTemplate.queryForMap(
         "SELECT t.id, m.email, s.is_available " +
             "FROM ticket t " +
@@ -254,72 +201,51 @@ class TicketServiceConcurrencyTest {
         targetSeatId
     );
 
-    log.info("최종 상태 검증:");
+    log.info("\n최종 상태 검증:");
     log.info("- 좌석 ID: {}", targetSeatId);
     log.info("- 티켓 보유자: {}", finalTicketInfo.get("email"));
     log.info("- 좌석 상태: {}", (Boolean) finalTicketInfo.get("is_available") ? "예약 가능" : "예약 불가");
-    log.info("- 결과: 결제 완료된 티켓의 동시 할당 시도로 인한 중복 예매 발생");
 
-    log.info("===== 테스트 종료 =====");
-    log.info("테스트 결과 요약:");
-    log.info("1. {} 상태: {}", firstUser, firstUserResult.get());
-    log.info("2. {} 상태: {}", secondUser, secondUserResult.get());
+    log.info("\n각 사용자별 최종 상태:");
+    userResults.forEach((email, result) -> {
+      log.info("- {}: {}", email, result.get());
+    });
 
-    // 실제 동시성 테스트에서는 어떤 사용자의 티켓이 성공했는지 확인
-    assertNotNull(finalTicketInfo.get("email"), "최소 한 명의 사용자가 티켓을 예매해야 함");
+    log.info("테스트 결과 분석 시작");
+    analyzeResults(results, bookingOrder, testEndTime - testStartTime);
 
-    // 시간 측정을 위한 변수 선언
-    long totalTestTime = System.nanoTime(); // 테스트 시작 시간
-
-// 1. 데이터베이스 상태 검증
+    log.info("데이터베이스 상태 검증");
     verifyDatabaseState(targetSeatId);
 
-// 2. 결과 분석
-    ConcurrentHashMap<String, BookingResult> results = new ConcurrentHashMap<>();
-    List<Long> bookingOrder = new ArrayList<>();
+    long successCount = results.values().stream()
+        .filter(BookingResult::isSuccess)
+        .count();
+    assertEquals(1, successCount, "정확히 1건의 예매만 성공해야 합니다");
 
-// 첫 번째 사용자의 시도 시간과 결과
-    String firstUserFinalResult = firstUserResult.get();
-    boolean firstUserSuccess = firstUserFinalResult.contains("성공");
-
-// 두 번째 사용자의 시도 시간과 결과
-    String secondUserFinalResult = secondUserResult.get();
-    boolean secondUserSuccess = secondUserFinalResult.contains("성공");
-
-// 첫 번째 사용자 결과 기록
-    results.put(firstUser, new BookingResult(
-        firstUserId.intValue(),  // Long을 int로 변환
-        firstUserSuccess,
-        firstUserSuccess ? null : "예매 실패", // 실패 메시지
-        100_000_000L, // 처리시간 (나노초)
-        targetSeatId
-    ));
-
-// 두 번째 사용자 결과 기록
-    results.put(secondUser, new BookingResult(
-        secondUserId.intValue(), // Long을 int로 변환
-        secondUserSuccess,
-        secondUserSuccess ? null : "예매 실패", // 실패 메시지
-        80_000_000L, // 처리시간 (나노초)
-        targetSeatId
-    ));
-
-// 예매 순서 기록 (성공한 경우만)
-    if (secondUserSuccess) {
-      bookingOrder.add(secondUserId);
-    }
-    if (firstUserSuccess) {
-      bookingOrder.add(firstUserId);
-    }
-
-// 총 테스트 시간 계산
-    long testEndTime = System.nanoTime();
-    long totalTestTimeNanos = testEndTime - totalTestTime;
-
-// 결과 분석 실행
-    analyzeResults(results, bookingOrder, totalTestTimeNanos);
+    log.info("===== 테스트 종료 =====");
   }
 
+  @Test
+  @DisplayName("단건 티켓을 예매할 경우, 예매가 성공한다.")
+  void testBookTicket_singleTicketSuccess() {
+    // given
+    TicketRequest ticketRequest = new TicketRequest();
+    ticketRequest.setSeatId(Collections.singletonList(1L));
+    ticketRequest.setDeviceId("deviceID");
+
+    String userEmail = "test1@test.com";
+
+    // when
+    List<TicketResponse> responses = ticketService.bookTicket(userEmail, ticketRequest);
+
+    // then
+    assertEquals(1, responses.size(), "One ticket response should be returned.");
+    Long ticketCount = jdbcTemplate.queryForObject(
+        "select count(*) from ticket where seat_id = 1 and member_id = 1",
+        Long.class
+    );
+    assertEquals(1, ticketCount, "One ticket should be recorded in the database.");
+  }
   private void analyzeResults(ConcurrentHashMap<String, BookingResult> results,
       List<Long> bookingOrder, long totalTestTime) {
     List<BookingResult> successResults = results.values().stream()
@@ -379,7 +305,6 @@ class TicketServiceConcurrencyTest {
   }
 
   private void verifyDatabaseState(Long seatId) {
-    // 티켓 수 확인
     Integer ticketCount = jdbcTemplate.queryForObject(
         "SELECT COUNT(*) FROM ticket WHERE seat_id = ?",
         Integer.class,
@@ -388,7 +313,6 @@ class TicketServiceConcurrencyTest {
     assertEquals(1, ticketCount,
         String.format("Seat %d should have exactly one ticket", seatId));
 
-    // 좌석 상태 확인
     Boolean seatAvailable = jdbcTemplate.queryForObject(
         "SELECT is_available FROM seat WHERE id = ?",
         Boolean.class,
