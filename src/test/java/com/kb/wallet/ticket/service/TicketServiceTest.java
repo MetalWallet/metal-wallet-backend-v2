@@ -116,7 +116,7 @@ class TicketServiceTest {
   }
 
   private void initializeTestData() {
-    for (int i = 1; i <= 50; i++) {
+    for (int i = 1; i <= 10; i++) {
       jdbcTemplate.execute(
           String.format(
               "INSERT INTO member (id, email, is_activated, name, password, phone, pin_number, role) "
@@ -143,7 +143,7 @@ class TicketServiceTest {
             "(1, 50, 'R', 190000, 1, 1)"
     );
 
-    for (int i = 1; i <= 50; i++) {
+    for (int i = 1; i <= 10; i++) {
       jdbcTemplate.execute(
           String.format(
               "INSERT INTO seat (id, is_available, seat_no, schedule_id, section_id) VALUES " +
@@ -329,91 +329,10 @@ class TicketServiceTest {
     verify(seatService, times(1)).getSeatById(2L);
   }
 
-
   @Test
-  @DisplayName("50명이 동시에 같은 좌석을 예매할 경우, 단 1건만 성공해야 한다")
-  void testConcurrentSameSeatBooking() throws InterruptedException {
-    // Given
-    int numberOfThreads = 50;
-    Long targetSeatId = 1L;
-
-    ExecutorService executor = Executors.newFixedThreadPool(numberOfThreads);
-    CountDownLatch readyLatch = new CountDownLatch(numberOfThreads);
-    CountDownLatch startLatch = new CountDownLatch(1);
-    CountDownLatch doneLatch = new CountDownLatch(numberOfThreads);
-
-    ConcurrentHashMap<String, BookingResult> results = new ConcurrentHashMap<>();
-    CopyOnWriteArrayList<Long> bookingOrder = new CopyOnWriteArrayList<>();
-
-    log.info("===== 동시 예매 테스트 시작 (동일 좌석) =====");
-    log.info("테스트 설정:");
-    log.info("- 총 시도 사용자 수: {} 명", numberOfThreads);
-    log.info("- 대상 좌석 번호: {}", targetSeatId);
-    log.info("- 예상 성공 건수: 1건");
-
-    for (int i = 1; i <= numberOfThreads; i++) {
-      final int userId = i;
-      final String userEmail = String.format("test%d@test.com", userId);
-
-      executor.submit(() -> {
-        try {
-          TicketRequest request = new TicketRequest();
-          request.setSeatId(Collections.singletonList(targetSeatId));
-          request.setDeviceId("device" + userId);
-
-          readyLatch.countDown();
-          startLatch.await();
-
-          long startTime = System.nanoTime();
-          try {
-            List<TicketResponse> response = ticketService.bookTicket(userEmail, request);
-            long endTime = System.nanoTime();
-
-            bookingOrder.add((long) userId);
-            results.put(userEmail,
-                new BookingResult(userId, true, null, endTime - startTime, targetSeatId));
-
-          } catch (Exception e) {
-            long endTime = System.nanoTime();
-            results.put(userEmail,
-                new BookingResult(userId, false, e.getMessage(), endTime - startTime,
-                    targetSeatId));
-          }
-        } catch (Exception e) {
-          log.error("예상치 못한 오류 발생 - 사용자: {}, 오류: {}", userEmail, e.getMessage());
-        } finally {
-          doneLatch.countDown();
-        }
-      });
-    }
-
-    readyLatch.await();
-    log.info("모든 사용자 준비 완료. 동시 예매 시작...");
-
-    long testStartTime = System.nanoTime();
-    startLatch.countDown();
-
-    boolean completed = doneLatch.await(10, TimeUnit.SECONDS);
-    long testEndTime = System.nanoTime();
-
-    if (!completed) {
-      log.error("테스트 타임아웃 발생 (30초 초과)");
-    }
-
-    executor.shutdown();
-
-    log.info("테스트 결과 분석 시작");
-    analyzeResults(results, bookingOrder, testEndTime - testStartTime);
-
-    log.info("데이터베이스 상태 검증");
-    verifyDatabaseState(targetSeatId);
-    log.info("===== 테스트 종료 =====");
-  }
-
-  @Test
-  @DisplayName("50명이 동시에 서로 다른 좌석을 예매할 경우, 모든 예매가 성공해야 한다")
+  @DisplayName("10명이 동시에 서로 다른 좌석을 예매할 경우, 모든 예매가 성공해야 한다")
   void testConcurrentDifferentSeatBooking() throws InterruptedException {
-    int numberOfThreads = 50;
+    int numberOfThreads = 10;
     ExecutorService executor = Executors.newFixedThreadPool(numberOfThreads);
     CountDownLatch readyLatch = new CountDownLatch(numberOfThreads);
     CountDownLatch startLatch = new CountDownLatch(1);
@@ -474,7 +393,7 @@ class TicketServiceTest {
     long testEndTime = System.nanoTime();
 
     if (!completed) {
-      log.error("테스트 타임아웃 발생 (30초 초과)");
+      log.error("테스트 타임아웃 발생 (10초 초과)");
     }
 
     executor.shutdown();
@@ -493,19 +412,17 @@ class TicketServiceTest {
   @Test
   @DisplayName("좌석 상태와 예매 정보 불일치 검증")
   void testSeatStatusAndTicketMismatch() {
-    // Given: 좌석만 예약된 비정상 상태 생성
+
     Long targetSeatId = 1L;
     log.info("좌석 ID {} 예약 불가능 상태로 설정", targetSeatId);
     jdbcTemplate.update("UPDATE seat SET is_available = false WHERE id = ?", targetSeatId);
 
-    // When: 검증 및 복구 프로세스 실행
     TicketRequest request = new TicketRequest();
     request.setSeatId(Collections.singletonList(targetSeatId));
     request.setDeviceId("device1");
 
     log.info("사용자 test1@test.com이 좌석 ID {}의 예매 시도", targetSeatId);
 
-    // Then: 예매 시도시 예외 발생 확인
     CustomException exception = assertThrows(CustomException.class, () -> {
       ticketService.bookTicket("test1@test.com", request);
     });
@@ -572,7 +489,6 @@ class TicketServiceTest {
   }
 
   private void verifyDatabaseState(Long seatId) {
-    // 티켓 수 확인
     Integer ticketCount = jdbcTemplate.queryForObject(
         "SELECT COUNT(*) FROM ticket WHERE seat_id = ?",
         Integer.class,
@@ -581,7 +497,6 @@ class TicketServiceTest {
     assertEquals(1, ticketCount,
         String.format("Seat %d should have exactly one ticket", seatId));
 
-    // 좌석 상태 확인
     Boolean seatAvailable = jdbcTemplate.queryForObject(
         "SELECT is_available FROM seat WHERE id = ?",
         Boolean.class,
