@@ -31,8 +31,9 @@ import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
-@ExtendWith(SpringExtension.class)
-@ContextConfiguration(classes = {AppConfig.class})
+@ContextConfiguration(classes = {
+    AppConfig.class
+})
 @WebAppConfiguration
 @ActiveProfiles("test")
 class TicketServiceConcurrencyTest {
@@ -291,6 +292,7 @@ class TicketServiceConcurrencyTest {
       log.info("순서: {}", bookingOrder.stream()
           .map(id -> String.format("test%d@test.com", id))
           .collect(Collectors.joining(" -> ")));
+
     }
 
     log.info("===== 분석 완료 =====\n");
