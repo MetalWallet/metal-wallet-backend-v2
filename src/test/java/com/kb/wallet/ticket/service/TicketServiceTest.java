@@ -175,13 +175,10 @@ class TicketServiceTest {
         .deviceId("device123")
         .build();
 
-    // given
     when(ticketRepository.findById(1L)).thenReturn(Optional.of(ticket));
 
-    // when
     Ticket result = ticketService.getTicket(1L);
 
-    // then
     assertThat(result).isNotNull();
     assertThat(result.getId()).isEqualTo(1L);
     verify(ticketRepository, times(1)).findById(1L);
@@ -190,10 +187,9 @@ class TicketServiceTest {
   @Test
   @DisplayName("티켓 조회 실패 - 티켓 미발견")
   void getTicket_NotFound() {
-    // given
+
     when(ticketRepository.findById(1L)).thenReturn(Optional.empty());
 
-    // when, then
     CustomException exception = assertThrows(CustomException.class,
         () -> ticketService.getTicket(1L));
     assertThat(exception.getMessage()).isEqualTo("티켓을 찾을 수 없습니다.");
@@ -206,13 +202,11 @@ class TicketServiceTest {
     request.setSeatId(Collections.singletonList(1L));
     request.setDeviceId("device123");
 
-    // given
     when(memberService.getMemberByEmail("test@example.com")).thenReturn(member);
     when(seatService.getSeatById(1L)).thenReturn(seat1);
     doThrow(new CustomException(ErrorCode.TICKET_NOT_FOUND_ERROR)).when(seat1)
         .checkSeatAvailability();
 
-    // when, then
     CustomException exception = assertThrows(CustomException.class,
         () -> ticketService.bookTicket("test@example.com", request));
     assertThat(exception.getMessage()).isEqualTo("티켓을 찾을 수 없습니다.");
@@ -229,14 +223,11 @@ class TicketServiceTest {
         .ticketStatus(TicketStatus.BOOKED)
         .build();
 
-    // given
     when(ticketRepository.findByTicketIdAndEmail(ticketId, member.getEmail())).thenReturn(
         Optional.of(ticket));
 
-    // when
     ticketService.cancelTicket("test@example.com", ticketId);
 
-    // then
     assertThat(ticket.getTicketStatus()).isEqualTo(TicketStatus.CANCELED);
     verify(ticketRepository, times(1)).save(ticket);
   }
@@ -246,11 +237,9 @@ class TicketServiceTest {
   void cancelTicket_NotFound() {
     Long ticketId = 1L;
 
-    // given
     when(ticketRepository.findByTicketIdAndEmail(ticketId, "test@example.com")).thenReturn(
         Optional.empty());
 
-    // when, then
     CustomException exception = assertThrows(CustomException.class,
         () -> ticketService.cancelTicket("test@example.com", ticketId));
     assertThat(exception.getMessage()).isEqualTo("티켓을 찾을 수 없습니다.");
@@ -259,7 +248,6 @@ class TicketServiceTest {
   @Test
   @DisplayName("사용자 티켓 목록 조회 성공")
   void getTickets_Success() {
-    // given
     TicketListResponse response = TicketListResponse.builder()
         .id(1L)
         .ticketStatus(TicketStatus.BOOKED)
@@ -271,11 +259,9 @@ class TicketServiceTest {
         null, pageable))
         .thenReturn(responses);
 
-    // when
     List<TicketListResponse> result = ticketService.getTickets("test@example.com",
         TicketStatus.BOOKED, 0, 10, null);
 
-    // then
     assertThat(result).isNotNull();
     assertThat(result.size()).isEqualTo(1);
     assertThat(result.get(0).getId()).isEqualTo(response.getId());
@@ -288,7 +274,6 @@ class TicketServiceTest {
     request.setSeatId(Arrays.asList(1L, 2L));
     request.setDeviceId("device123");
 
-    // given
     when(memberService.getMemberByEmail("test@example.com")).thenReturn(member);
     when(seatService.getSeatById(1L)).thenReturn(seat1);
     when(seatService.getSeatById(2L)).thenReturn(seat2);
@@ -314,10 +299,8 @@ class TicketServiceTest {
 
     when(ticketRepository.save(any(Ticket.class))).thenReturn(ticket1, ticket2);
 
-    // when
     List<TicketResponse> responses = ticketService.bookTicket("test@example.com", request);
 
-    // then
     assertThat(responses).isNotNull();
     assertThat(responses.size()).isEqualTo(2);
     verify(seat1, times(1)).checkSeatAvailability();
