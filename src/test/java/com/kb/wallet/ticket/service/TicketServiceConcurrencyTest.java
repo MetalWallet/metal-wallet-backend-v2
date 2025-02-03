@@ -17,10 +17,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import com.kb.wallet.ticket.dto.BookingResult;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -31,13 +30,12 @@ import org.springframework.test.context.web.WebAppConfiguration;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @ExtendWith(SpringExtension.class)
 @ContextConfiguration(classes = {AppConfig.class})
 @WebAppConfiguration
 @ActiveProfiles("test")
 class TicketServiceConcurrencyTest {
-
-  private static final Logger log = LoggerFactory.getLogger(TicketServiceConcurrencyTest.class);
 
   @Autowired
   private TicketService ticketService;
@@ -47,8 +45,6 @@ class TicketServiceConcurrencyTest {
 
   @BeforeEach
   public void setUp() {
-    cleanUpAll();
-    // member 데이터 삽입
     for (int i = 1; i <= 10; i++) {
       jdbcTemplate.execute(
           String.format(
@@ -80,7 +76,6 @@ class TicketServiceConcurrencyTest {
     cleanUpAll();
   }
 
-
   private void cleanUpAll() {
     jdbcTemplate.execute("DELETE FROM ticket");
     jdbcTemplate.execute("DELETE FROM seat");
@@ -89,10 +84,10 @@ class TicketServiceConcurrencyTest {
     jdbcTemplate.execute("DELETE FROM musical");
     jdbcTemplate.execute("DELETE FROM member");
   }
+
   @Test
   @DisplayName("10명이 동시에 같은 좌석을 예매할 경우, 단 1건만 성공해야 한다")
   void testConcurrentSameSeatBooking() throws InterruptedException {
-    // Given
     int numberOfThreads = 10;
     Long targetSeatId = 1L;
 
@@ -228,17 +223,14 @@ class TicketServiceConcurrencyTest {
   @Test
   @DisplayName("단건 티켓을 예매할 경우, 예매가 성공한다.")
   void testBookTicket_singleTicketSuccess() {
-    // given
     TicketRequest ticketRequest = new TicketRequest();
     ticketRequest.setSeatId(Collections.singletonList(1L));
     ticketRequest.setDeviceId("deviceID");
 
     String userEmail = "test1@test.com";
 
-    // when
     List<TicketResponse> responses = ticketService.bookTicket(userEmail, ticketRequest);
 
-    // then
     assertEquals(1, responses.size(), "One ticket response should be returned.");
     Long ticketCount = jdbcTemplate.queryForObject(
         "select count(*) from ticket where seat_id = 1 and member_id = 1",
