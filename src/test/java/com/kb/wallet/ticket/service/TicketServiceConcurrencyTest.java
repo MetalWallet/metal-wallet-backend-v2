@@ -3,21 +3,31 @@ package com.kb.wallet.ticket.service;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.kb.wallet.global.config.AppConfig;
+import com.kb.wallet.global.exception.CustomException;
 import com.kb.wallet.ticket.dto.request.TicketRequest;
 import com.kb.wallet.ticket.dto.response.TicketResponse;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
 import org.springframework.test.context.web.WebAppConfiguration;
+import org.springframework.transaction.TransactionSystemException;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @ExtendWith(SpringExtension.class)
@@ -215,65 +225,6 @@ class TicketServiceConcurrencyTest {
     );
     assertEquals(1, ticketCount, "One ticket should be recorded in the database.");
   }
-<<<<<<< Updated upstream
-  private void analyzeResults(ConcurrentHashMap<String, BookingResult> results,
-      List<Long> bookingOrder, long totalTestTime) {
-    List<BookingResult> successResults = results.values().stream()
-        .filter(BookingResult::isSuccess)
-        .sorted(Comparator.comparingLong(BookingResult::getProcessingTimeNanos))
-        .collect(Collectors.toList());
-
-  @Test
-  @DisplayName("10명의 사용자가 동시에 티켓을 예매할 경우, 단 1건의 예매만 성공한다.")
-  void testBookTicket_multipleUsersSingleSeatSuccess2() throws InterruptedException {
-
-    int threadCount = 10;
-    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-    CountDownLatch latch = new CountDownLatch(threadCount);
-    List<Exception> exceptions = new ArrayList<>();
-
-    for(int i=1; i<=10; i++) {
-      String email = "test" + i + "@gmail.com";
-      TicketRequest request = new TicketRequest();
-      request.setDeviceId("diviceID" + i);
-      request.setSeatId(Collections.singletonList(1L));
-
-      executor.submit(() -> {
-        try {
-          latch.countDown();
-          latch.await();
-          Thread.sleep(50);
-          ticketService.bookTicket(email, request);
-        } catch (Exception e) {
-          String errorMessage = "Exception occurred for " + email + ": " + e.getMessage();
-          System.out.println(errorMessage);
-          exceptions.add(e);
-        }
-      });
-    }
-
-    executor.shutdown();
-    executor.awaitTermination(1, TimeUnit.MINUTES);
-
-    // Check the number of tickets created in the ticket table
-    String sql = "select count(*) from ticket";
-    Integer ticketCount = jdbcTemplate.queryForObject(sql, Integer.class);
-    System.out.println("현재 생성된 행의 개수: " + ticketCount);
-    assertEquals(1, ticketCount.intValue());
-
-    // 예외 처리 내용을 확인하거나 로깅
-    if (!exceptions.isEmpty()) {
-      System.out.println("Exceptions occurred during ticket booking:");
-      for (Exception e : exceptions) {
-        System.out.println(e.getMessage());
-      }
-
-    }
-
-    log.info("===== 분석 완료 =====\n");
-  }
-=======
->>>>>>> Stashed changes
 
   private void verifyDatabaseState(Long seatId) {
     Integer ticketCount = jdbcTemplate.queryForObject(
