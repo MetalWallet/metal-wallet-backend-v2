@@ -3,32 +3,21 @@ package com.kb.wallet.ticket.service;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.kb.wallet.global.config.AppConfig;
-import com.kb.wallet.global.exception.CustomException;
 import com.kb.wallet.ticket.dto.request.TicketRequest;
 import com.kb.wallet.ticket.dto.response.TicketResponse;
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
-import com.kb.wallet.ticket.dto.BookingResult;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
 import org.springframework.test.context.web.WebAppConfiguration;
-import org.springframework.transaction.TransactionSystemException;
-import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @ExtendWith(SpringExtension.class)
@@ -96,8 +85,6 @@ class TicketServiceConcurrencyTest {
     CountDownLatch readyLatch = new CountDownLatch(numberOfThreads);
     CountDownLatch startLatch = new CountDownLatch(1);
     CountDownLatch doneLatch = new CountDownLatch(numberOfThreads);
-
-    ConcurrentHashMap<String, BookingResult> results = new ConcurrentHashMap<>();
     CopyOnWriteArrayList<Long> bookingOrder = new CopyOnWriteArrayList<>();
 
     log.info("===== 동시 예매 테스트 시작 (동일 좌석) =====");
@@ -148,8 +135,7 @@ class TicketServiceConcurrencyTest {
             log.info("- 소요 시간: {}ms", (endTime - startTime) / 1_000_000.0);
 
             bookingOrder.add((long) userId);
-            results.put(userEmail,
-                new BookingResult(userId, true, null, endTime - startTime, targetSeatId));
+
             userResults.get(userEmail).set("예매 성공");
 
           } catch (Exception e) {
@@ -160,8 +146,6 @@ class TicketServiceConcurrencyTest {
             log.error("- 시도 좌석: {}", targetSeatId);
             log.error("- 소요 시간: {}ms", (endTime - startTime) / 1_000_000.0);
 
-            results.put(userEmail,
-                new BookingResult(userId, false, e.getMessage(), endTime - startTime, targetSeatId));
             userResults.get(userEmail).set("예매 실패: " + e.getMessage());
           }
         } catch (Exception e) {
@@ -207,16 +191,8 @@ class TicketServiceConcurrencyTest {
       log.info("- {}: {}", email, result.get());
     });
 
-    log.info("테스트 결과 분석 시작");
-    analyzeResults(results, bookingOrder, testEndTime - testStartTime);
-
     log.info("데이터베이스 상태 검증");
     verifyDatabaseState(targetSeatId);
-
-    long successCount = results.values().stream()
-        .filter(BookingResult::isSuccess)
-        .count();
-    assertEquals(1, successCount, "정확히 1건의 예매만 성공해야 합니다");
 
     log.info("===== 테스트 종료 =====");
   }
@@ -239,6 +215,7 @@ class TicketServiceConcurrencyTest {
     );
     assertEquals(1, ticketCount, "One ticket should be recorded in the database.");
   }
+<<<<<<< Updated upstream
   private void analyzeResults(ConcurrentHashMap<String, BookingResult> results,
       List<Long> bookingOrder, long totalTestTime) {
     List<BookingResult> successResults = results.values().stream()
@@ -295,6 +272,8 @@ class TicketServiceConcurrencyTest {
 
     log.info("===== 분석 완료 =====\n");
   }
+=======
+>>>>>>> Stashed changes
 
   private void verifyDatabaseState(Long seatId) {
     Integer ticketCount = jdbcTemplate.queryForObject(

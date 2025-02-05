@@ -11,7 +11,6 @@ import com.kb.wallet.seat.service.SeatService;
 import com.kb.wallet.ticket.constant.TicketStatus;
 import com.kb.wallet.ticket.domain.Schedule;
 import com.kb.wallet.ticket.domain.Ticket;
-import com.kb.wallet.ticket.dto.BookingResult;
 import com.kb.wallet.ticket.dto.request.TicketRequest;
 import com.kb.wallet.ticket.dto.response.TicketListResponse;
 import com.kb.wallet.ticket.dto.response.TicketResponse;
@@ -54,7 +53,6 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.bouncycastle.asn1.x500.style.RFC4519Style.member;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -321,7 +319,6 @@ class TicketServiceTest {
     CountDownLatch startLatch = new CountDownLatch(1);
     CountDownLatch doneLatch = new CountDownLatch(numberOfThreads);
 
-    ConcurrentHashMap<String, BookingResult> results = new ConcurrentHashMap<>();
     CopyOnWriteArrayList<Long> bookingOrder = new CopyOnWriteArrayList<>();
 
     log.info("===== 동시 예매 테스트 시작 (서로 다른 좌석) =====");
@@ -349,13 +346,9 @@ class TicketServiceTest {
             long endTime = System.nanoTime();
 
             bookingOrder.add((long) userId);
-            results.put(userEmail,
-                new BookingResult(userId, true, null, endTime - startTime, seatId));
-
           } catch (Exception e) {
             long endTime = System.nanoTime();
-            results.put(userEmail,
-                new BookingResult(userId, false, e.getMessage(), endTime - startTime, seatId));
+
           }
         } catch (Exception e) {
           log.error("예상치 못한 오류 발생 - 사용자: {}, 좌석: {}, 오류: {}",
@@ -382,8 +375,6 @@ class TicketServiceTest {
     executor.shutdown();
 
     log.info("테스트 결과 분석 시작");
-    analyzeResults(results, bookingOrder, testEndTime - testStartTime);
-
     log.info("데이터베이스 상태 검증 시작");
     for (long seatId = 1; seatId <= numberOfThreads; seatId++) {
       log.info("좌석 {} 상태 검증 중...", seatId);
@@ -413,63 +404,6 @@ class TicketServiceTest {
     log.error("예매 실패 - 좌석 ID {}: {}", targetSeatId, exception.getMessage());
   }
 
-  private void analyzeResults(ConcurrentHashMap<String, BookingResult> results,
-      List<Long> bookingOrder, long totalTestTime) {
-    List<BookingResult> successResults = results.values().stream()
-        .filter(BookingResult::isSuccess)
-        .sorted(Comparator.comparingLong(BookingResult::getProcessingTimeNanos))
-        .collect(Collectors.toList());
-
-    List<BookingResult> failResults = results.values().stream()
-        .filter(r -> !r.isSuccess())
-        .sorted(Comparator.comparingLong(BookingResult::getProcessingTimeNanos))
-        .collect(Collectors.toList());
-
-    double avgProcessingTime = results.values().stream()
-        .mapToLong(BookingResult::getProcessingTimeNanos)
-        .average()
-        .orElse(0.0) / 1_000_000.0;
-
-    log.info("\n===== 예매 테스트 결과 분석 =====");
-    log.info("1. 전체 요약");
-    log.info("- 총 소요 시간: {}ms", totalTestTime / 1_000_000.0);
-    log.info("- 전체 시도: {} 건", results.size());
-    log.info("- 성공: {} 건", successResults.size());
-    log.info("- 실패: {} 건", failResults.size());
-    log.info("- 평균 처리 시간: {}ms", avgProcessingTime);
-
-    if (!successResults.isEmpty()) {
-      log.info("\n2. 예매 성공 내역");
-      successResults.forEach(result -> {
-        log.info("사용자: test{}@test.com, 좌석: {}, 처리시간: {}ms",
-            result.getUserId(),
-            result.getSeatId(),
-            result.getProcessingTimeNanos() / 1_000_000.0);
-      });
-    }
-
-    if (!failResults.isEmpty()) {
-      log.info("\n3. 예매 실패 내역");
-      Map<String, Long> errorCounts = failResults.stream()
-          .collect(Collectors.groupingBy(
-              BookingResult::getErrorMessage,
-              Collectors.counting()
-          ));
-
-      log.info("실패 사유별 통계:");
-      errorCounts.forEach((error, count) ->
-          log.info("- {}: {} 건", error, count));
-    }
-
-    if (!bookingOrder.isEmpty()) {
-      log.info("\n4. 예매 처리 순서");
-      log.info("순서: {}", bookingOrder.stream()
-          .map(id -> String.format("test%d@test.com", id))
-          .collect(Collectors.joining(" -> ")));
-    }
-
-    log.info("===== 분석 완료 =====\n");
-  }
 
   private void verifyDatabaseState(Long seatId) {
     Integer ticketCount = jdbcTemplate.queryForObject(
