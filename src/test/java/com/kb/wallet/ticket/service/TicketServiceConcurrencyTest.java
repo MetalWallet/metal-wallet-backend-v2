@@ -32,7 +32,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @ExtendWith(SpringExtension.class)
-@ContextConfiguration(classes = {AppConfig.class})
+@ContextConfiguration(classes = {
+    AppConfig.class
+})
 @WebAppConfiguration
 @ActiveProfiles("test")
 class TicketServiceConcurrencyTest {
@@ -45,13 +47,12 @@ class TicketServiceConcurrencyTest {
 
   @BeforeEach
   public void setUp() {
-    for (int i = 1; i <= 10; i++) {
+    // member 데이터 삽입
+    for(int i=1; i<=10; i++) {
       jdbcTemplate.execute(
-          String.format(
-              "insert into member (id, email, is_activated, name, password, phone, pin_number, role) values "
-                  + "(%d, 'test%d@test.com', true, 'test%d', 'password%d', '0101111%04d', '111111', 'USER')",
-              i, i, i, i, i)
-      );
+          "insert into member (id, email, is_activated, name, password, phone, pin_number, role) values (" +
+              i + ", 'test" + i + "@gmail.com', true, 'test" + i + "', 'password" + i + "', '0100000000" + i + "', '" +
+              String.format("%06d", i) + "', 'USER')");
     }
 
     jdbcTemplate.execute(
@@ -245,52 +246,51 @@ class TicketServiceConcurrencyTest {
         .sorted(Comparator.comparingLong(BookingResult::getProcessingTimeNanos))
         .collect(Collectors.toList());
 
-    List<BookingResult> failResults = results.values().stream()
-        .filter(r -> !r.isSuccess())
-        .sorted(Comparator.comparingLong(BookingResult::getProcessingTimeNanos))
-        .collect(Collectors.toList());
+  @Test
+  @DisplayName("10명의 사용자가 동시에 티켓을 예매할 경우, 단 1건의 예매만 성공한다.")
+  void testBookTicket_multipleUsersSingleSeatSuccess2() throws InterruptedException {
 
-    double avgProcessingTime = results.values().stream()
-        .mapToLong(BookingResult::getProcessingTimeNanos)
-        .average()
-        .orElse(0.0) / 1_000_000.0;
+    int threadCount = 10;
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+    CountDownLatch latch = new CountDownLatch(threadCount);
+    List<Exception> exceptions = new ArrayList<>();
 
-    log.info("\n===== 예매 테스트 결과 분석 =====");
-    log.info("1. 전체 요약");
-    log.info("- 총 소요 시간: {}ms", totalTestTime / 1_000_000.0);
-    log.info("- 전체 시도: {} 건", results.size());
-    log.info("- 성공: {} 건", successResults.size());
-    log.info("- 실패: {} 건", failResults.size());
-    log.info("- 평균 처리 시간: {}ms", avgProcessingTime);
+    for(int i=1; i<=10; i++) {
+      String email = "test" + i + "@gmail.com";
+      TicketRequest request = new TicketRequest();
+      request.setDeviceId("diviceID" + i);
+      request.setSeatId(Collections.singletonList(1L));
 
-    if (!successResults.isEmpty()) {
-      log.info("\n2. 예매 성공 내역");
-      successResults.forEach(result -> {
-        log.info("사용자: test{}@test.com, 좌석: {}, 처리시간: {}ms",
-            result.getUserId(),
-            result.getSeatId(),
-            result.getProcessingTimeNanos() / 1_000_000.0);
+      executor.submit(() -> {
+        try {
+          latch.countDown();
+          latch.await();
+          Thread.sleep(50);
+          ticketService.bookTicket(email, request);
+        } catch (Exception e) {
+          String errorMessage = "Exception occurred for " + email + ": " + e.getMessage();
+          System.out.println(errorMessage);
+          exceptions.add(e);
+        }
       });
     }
 
-    if (!failResults.isEmpty()) {
-      log.info("\n3. 예매 실패 내역");
-      Map<String, Long> errorCounts = failResults.stream()
-          .collect(Collectors.groupingBy(
-              BookingResult::getErrorMessage,
-              Collectors.counting()
-          ));
+    executor.shutdown();
+    executor.awaitTermination(1, TimeUnit.MINUTES);
 
-      log.info("실패 사유별 통계:");
-      errorCounts.forEach((error, count) ->
-          log.info("- {}: {} 건", error, count));
-    }
+    // Check the number of tickets created in the ticket table
+    String sql = "select count(*) from ticket";
+    Integer ticketCount = jdbcTemplate.queryForObject(sql, Integer.class);
+    System.out.println("현재 생성된 행의 개수: " + ticketCount);
+    assertEquals(1, ticketCount.intValue());
 
-    if (!bookingOrder.isEmpty()) {
-      log.info("\n4. 예매 처리 순서");
-      log.info("순서: {}", bookingOrder.stream()
-          .map(id -> String.format("test%d@test.com", id))
-          .collect(Collectors.joining(" -> ")));
+    // 예외 처리 내용을 확인하거나 로깅
+    if (!exceptions.isEmpty()) {
+      System.out.println("Exceptions occurred during ticket booking:");
+      for (Exception e : exceptions) {
+        System.out.println(e.getMessage());
+      }
+
     }
 
     log.info("===== 분석 완료 =====\n");
